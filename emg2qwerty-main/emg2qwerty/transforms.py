@@ -155,6 +155,118 @@ class TemporalAlignmentJitter:
 
 
 @dataclass
+class LogSpectrogram16:
+    """
+    Creates log10-scaled spectrogram from an EMG signal, then aggregates the
+    frequency axis into 16 log-spaced bins.
+    
+    Args:
+        n_fft (int): Size of FFT; produces n_fft//2+1 linear bins (default: 64).
+        hop_length (int): Number of samples to stride between STFT windows (default: 16).
+        sample_rate (int): Sampling rate in Hz (default: 2000).
+        f_min (float): Lower frequency bound for log bins (default: 20.0 Hz).
+        f_max (float): Upper frequency bound for log bins (default: 1000.0 Hz).
+    """
+    n_fft: int = 64
+    hop_length: int = 16
+    sample_rate: int = 2000
+    f_min: float = 20.0
+    f_max: float = 1000.0
+
+    def __post_init__(self) -> None:
+        self.spectrogram = torchaudio.transforms.Spectrogram(
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            normalized=True,
+            center=False,
+        )
+        # Compute the linear frequency bin values.
+        n_lin = self.n_fft // 2 + 1
+        freqs = torch.linspace(0, self.sample_rate / 2, n_lin)
+        # Create 17 boundaries for 16 bins (log-spaced between f_min and f_max).
+        boundaries = torch.logspace(torch.log10(torch.tensor(self.f_min)),
+                                    torch.log10(torch.tensor(self.f_max)),
+                                    steps=17)
+        # Map boundaries to the indices of the linear bins.
+        self.bin_edges = torch.bucketize(boundaries, freqs).tolist()
+        # Ensure proper ordering (e.g. if two boundaries map to the same index).
+        for i in range(1, len(self.bin_edges)):
+            if self.bin_edges[i] <= self.bin_edges[i-1]:
+                self.bin_edges[i] = self.bin_edges[i-1] + 1
+
+    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
+        x = tensor.movedim(0, -1)         # (T, ..., C) -> (..., C, T)
+        spec = self.spectrogram(x)          # (..., C, freq, T)
+        logspec = torch.log10(spec + 1e-6)    # (..., C, freq, T)
+        logspec = logspec.movedim(-1, 0)      # (T, ..., C, freq)
+        # Aggregate frequency bins into 16 log-spaced bins.
+        bins = []
+        start = self.bin_edges[0]
+        for end in self.bin_edges[1:]:
+            # Sum over the selected linear bins.
+            bins.append(logspec[..., start:end].sum(dim=-1, keepdim=True))
+            start = end
+        out = torch.cat(bins, dim=-1)        # (T, ..., C, 16)
+        return out
+
+
+@dataclass
+class LogSpectrogram6:
+    """
+    Creates log10-scaled spectrogram from an EMG signal, then aggregates the
+    frequency axis into 6 log-spaced bins.
+    
+    Args:
+        n_fft (int): Size of FFT; produces n_fft//2+1 linear bins (default: 64).
+        hop_length (int): Number of samples to stride between STFT windows (default: 16).
+        sample_rate (int): Sampling rate in Hz (default: 2000).
+        f_min (float): Lower frequency bound for log bins (default: 20.0 Hz).
+        f_max (float): Upper frequency bound for log bins (default: 1000.0 Hz).
+    """
+    n_fft: int = 64
+    hop_length: int = 16
+    sample_rate: int = 2000
+    f_min: float = 20.0
+    f_max: float = 1000.0
+
+    def __post_init__(self) -> None:
+        self.spectrogram = torchaudio.transforms.Spectrogram(
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            normalized=True,
+            center=False,
+        )
+        # Compute the linear frequency bin values.
+        n_lin = self.n_fft // 2 + 1
+        freqs = torch.linspace(0, self.sample_rate / 2, n_lin)
+        # Create 7 boundaries for 6 bins (log-spaced between f_min and f_max).
+        boundaries = torch.logspace(torch.log10(torch.tensor(self.f_min)),
+                                    torch.log10(torch.tensor(self.f_max)),
+                                    steps=7)
+        # Map boundaries to the indices of the linear bins.
+        self.bin_edges = torch.bucketize(boundaries, freqs).tolist()
+        # Ensure proper ordering (e.g. if two boundaries map to the same index).
+        for i in range(1, len(self.bin_edges)):
+            if self.bin_edges[i] <= self.bin_edges[i-1]:
+                self.bin_edges[i] = self.bin_edges[i-1] + 1
+
+    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
+        x = tensor.movedim(0, -1)         # (T, ..., C) -> (..., C, T)
+        spec = self.spectrogram(x)          # (..., C, freq, T)
+        logspec = torch.log10(spec + 1e-6)    # (..., C, freq, T)
+        logspec = logspec.movedim(-1, 0)      # (T, ..., C, freq)
+        # Aggregate frequency bins into 6 log-spaced bins.
+        bins = []
+        start = self.bin_edges[0]
+        for end in self.bin_edges[1:]:
+            # Sum over the selected linear bins.
+            bins.append(logspec[..., start:end].sum(dim=-1, keepdim=True))
+            start = end
+        out = torch.cat(bins, dim=-1)        # (T, ..., C, 6)
+        return out
+
+
+@dataclass
 class LogSpectrogram:
     """Creates log10-scaled spectrogram from an EMG signal. In the case of
     multi-channeled signal, the channels are treated independently.
@@ -243,3 +355,37 @@ class SpecAugment:
 
         # (..., C, freq, T) -> (T, ..., C, freq)
         return x.movedim(-1, 0)
+
+@dataclass
+class RandomCropPercentage:
+    """Applies a random crop along the time dimension (T) of the input tensor
+    based on a given percentage of the total length of the time dimension.
+
+    Args:
+        crop_percentage (float): The percentage of the input signal to crop (0.0 - 100.0).
+        time_dim (int): The dimension along which to apply the crop. (default: 0)
+    """
+
+    crop_percentage: float
+    time_dim: int = 0
+
+    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
+        assert 0 <= self.crop_percentage <= 100, "crop_percentage must be between 0 and 100"
+        
+        time_size = tensor.shape[self.time_dim]
+
+        crop_size = int(time_size * (self.crop_percentage / 100))
+
+        crop_size = max(1, crop_size)
+        
+        assert time_size >= crop_size, (
+            f"Input tensor must have at least {crop_size} elements in the time dimension"
+        )
+
+        max_start_idx = time_size - crop_size
+        start_idx = np.random.randint(0, max_start_idx + 1)
+
+        slices = [slice(None)] * tensor.ndimension()  # Create a list of full slices
+        slices[self.time_dim] = slice(start_idx, start_idx + crop_size)  # Update the time dimension slice
+
+        return tensor[tuple(slices)]

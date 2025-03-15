@@ -451,6 +451,7 @@ class WindowedEMGDataset(torch.utils.data.Dataset):
     padding: InitVar[tuple[int, int]] = (0, 0)
     jitter: bool = False
     transform: Transform[np.ndarray, torch.Tensor] = field(default_factory=ToTensor)
+    electrodes: int | None = None # number of electrodes to keep per EMG band
 
     def __post_init__(
         self,
@@ -495,6 +496,14 @@ class WindowedEMGDataset(torch.utils.data.Dataset):
         window_start = max(offset - self.left_padding, 0)
         window_end = offset + self.window_length + self.right_padding
         window = self.session[window_start:window_end]
+
+        # If a specific number of electrodes per band is chosen, slice the fields accordingly.
+        if self.electrodes is not None:
+            window = {
+                "time": window[EMGSessionData.TIMESTAMPS],
+                "emg_left": window[EMGSessionData.EMG_LEFT][:, : self.electrodes],
+                "emg_right": window[EMGSessionData.EMG_RIGHT][:, : self.electrodes],
+            }
 
         # Extract EMG tensor corresponding to the window.
         emg = self.transform(window)

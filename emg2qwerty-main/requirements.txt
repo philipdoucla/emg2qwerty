@@ -7,7 +7,7 @@ hypothesis==6.97.6
 lightning-bolts==0.7.0
 mne-bids==0.15.0
 nltk==3.8.1
-numpy==1.24.4
+numpy==1.26.0
 omegaconf==2.3.0
 pandas==2.0.3
 pip==24.0

@@ -278,3 +278,28 @@ class TDSConvEncoder(nn.Module):
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
         return self.tds_conv_blocks(inputs)  # (T, N, num_features)
+
+class TDSLSTMEncoder(nn.Module):
+    def __init__(
+        self,
+        num_features: int,
+        lstm_hidden_size: int=128,
+        num_lstm_layers: int=4,
+    ) -> None:
+        super().__init__()
+        self.lstm_layers = nn.LSTM(
+            input_size=num_features,
+            hidden_size=lstm_hidden_size,
+            num_layers=num_lstm_layers,
+            batch_first=False, # Input shape: (T,N,num_features)
+            bidirectional=True
+        )
+        # Fully connected block (remains the same)
+        self.fc_block = TDSFullyConnectedBlock(lstm_hidden_size*2)
+        self.out_layer = nn.Linear(lstm_hidden_size*2, num_features)
+        
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        x, _ = self.lstm_layers(inputs) # (T,N,lstm_hidden_size*2)
+        x = self.fc_block(x) # Apply FC transformation
+        x = self.out_layer(x)
+        return x
